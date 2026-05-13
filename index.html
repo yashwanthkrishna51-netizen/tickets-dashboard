@@ -207,6 +207,7 @@ tr:hover { background: #f9fafb; }
 </select>
 <select id="agent-filter"><option value="">All Agents</option></select>
 <button onclick="exportCSV()">📥 Export CSV</button>
+<button onclick="openAllTickets()" style="background: linear-gradient(135deg, #059669 0%, #047857 100%);">🔗 Open All Tickets</button>
 <button onclick="refreshData()" style="background: white; color: #3b82f6; border: 2px solid #3b82f6;">🔄 Refresh</button>
 </div>
 <div style="overflow-x: auto;">
@@ -699,6 +700,34 @@ function exportCSV() {
   a.href = url;
   a.download = `tickets-export-${new Date().toISOString().split('T')[0]}.csv`;
   a.click();
+}
+
+function openAllTickets() {
+  const filtered = filterTickets();
+  
+  if (filtered.length === 0) {
+    alert('No tickets to open. Try adjusting your filters.');
+    return;
+  }
+  
+  // Confirm if opening many tickets
+  if (filtered.length > 10) {
+    const confirmed = confirm(`This will open ${filtered.length} tickets in new tabs. Continue?\n\nTip: Your browser may block pop-ups. Allow them if prompted.`);
+    if (!confirmed) return;
+  }
+  
+  // Open tickets with small delay to avoid browser blocking
+  filtered.forEach((ticket, index) => {
+    const ticketId = ticket[0];
+    const strippedId = ticketId.replace(/^#(INT|DBS)/, '');
+    const ticketLink = `https://askdarwin.darwinbox.com/staff/ticket/${strippedId}`;
+    
+    setTimeout(() => {
+      window.open(ticketLink, '_blank');
+    }, index * 200); // 200ms delay between each
+  });
+  
+  alert(`✅ Opening ${filtered.length} ticket(s). Check for pop-up blocker if tabs don't appear.`);
 }
 
 function refreshData() {
