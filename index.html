@@ -280,12 +280,30 @@ function saveConfig() {
 
 async function loadData() {
   try {
-    // Fetch CSV
-    const csvRes = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/open_with_us_tickets.csv`, {
-      headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+    // Add cache-busting timestamp
+    const cacheBuster = `?cb=${Date.now()}`;
+    
+    console.log('🔄 Loading data from GitHub...');
+    
+    // Fetch CSV - use raw URL to bypass API caching
+    const csvUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/data/open_with_us_tickets.csv${cacheBuster}`;
+    console.log('📥 Fetching CSV from:', csvUrl);
+    
+    const csvRes = await fetch(csvUrl, {
+      headers: { 
+        'Authorization': `token ${GITHUB_TOKEN}`,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
     });
-    const csvFile = await csvRes.json();
-    const csvContent = atob(csvFile.content);
+    
+    if (!csvRes.ok) {
+      throw new Error(`CSV fetch failed: ${csvRes.status} ${csvRes.statusText}`);
+    }
+    
+    const csvContent = await csvRes.text();
+    console.log('✅ CSV loaded, size:', csvContent.length, 'bytes');
     
     // Parse CSV
     const parsed = Papa.parse(csvContent, { header: true, skipEmptyLines: true });
@@ -300,22 +318,47 @@ async function loadData() {
       row['Last Updated At'] || ''
     ]);
     
-    // Fetch status overrides
+    console.log('✅ Parsed', tickets.length, 'tickets from CSV');
+    
+    // Fetch status overrides - use raw URL
     try {
-      const statusRes = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
-        headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+      const jsonUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/data/ticket_status.json${cacheBuster}`;
+      console.log('📥 Fetching overrides from:', jsonUrl);
+      
+      const statusRes = await fetch(jsonUrl, {
+        headers: { 
+          'Authorization': `token ${GITHUB_TOKEN}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
       });
-      const statusFile = await statusRes.json();
-      ticketOverrides = JSON.parse(atob(statusFile.content));
+      
+      if (!statusRes.ok) {
+        throw new Error(`JSON fetch failed: ${statusRes.status}`);
+      }
+      
+      const jsonText = await statusRes.text();
+      console.log('✅ JSON loaded, size:', jsonText.length, 'bytes');
+      console.log('📄 JSON content preview:', jsonText.substring(0, 200));
+      
+      ticketOverrides = JSON.parse(jsonText);
+      console.log('✅ Loaded overrides for', Object.keys(ticketOverrides).length, 'tickets');
+      console.log('📋 Override tickets:', Object.keys(ticketOverrides));
+      
     } catch (e) {
+      console.log('ℹ️ No overrides file found or error loading:', e.message);
       ticketOverrides = {};
     }
     
     // Apply overrides to tickets
+    let overrideCount = 0;
     tickets = tickets.map(ticket => {
       const ticketId = ticket[0];
       if (ticketOverrides[ticketId]) {
+        overrideCount++;
         const overrides = ticketOverrides[ticketId];
+        console.log(`🔄 Applying overrides to ${ticketId}:`, overrides);
         return [
           ticket[0], // ID never changes
           overrides.subject !== undefined ? overrides.subject : ticket[1],
@@ -329,6 +372,8 @@ async function loadData() {
       }
       return ticket;
     });
+    
+    console.log('✅ Applied overrides to', overrideCount, 'tickets');
     
     // Calculate analytics
     analyzeData();
@@ -612,6 +657,8 @@ async function editCell(ticketId, columnName, currentValue) {
   const newValue = prompt(`Edit ${columnName}:`, unescapedValue);
   if (newValue === null || newValue === unescapedValue) return;
   
+  console.log(`💾 Saving ${columnName} for ${ticketId}: "${unescapedValue}" → "${newValue}"`);
+  
   try {
     // Get current file
     let sha = null;
@@ -622,7 +669,9 @@ async function editCell(ticketId, columnName, currentValue) {
       const file = await res.json();
       ticketOverrides = JSON.parse(atob(file.content));
       sha = file.sha;
+      console.log('📥 Fetched existing overrides, SHA:', sha);
     } catch (e) {
+      console.log('ℹ️ Creating new overrides file');
       ticketOverrides = {};
     }
     
@@ -632,8 +681,13 @@ async function editCell(ticketId, columnName, currentValue) {
     }
     ticketOverrides[ticketId][columnName] = newValue;
     
+    console.log('📝 Updated override object:', ticketOverrides[ticketId]);
+    
+    const newContent = JSON.stringify(ticketOverrides, null, 2);
+    console.log('📄 Saving JSON (first 500 chars):', newContent.substring(0, 500));
+    
     // Save to GitHub
-    await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
+    const saveRes = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
       method: 'PUT',
       headers: {
         'Authorization': `token ${GITHUB_TOKEN}`,
@@ -641,10 +695,19 @@ async function editCell(ticketId, columnName, currentValue) {
       },
       body: JSON.stringify({
         message: `Update ${columnName} for ${ticketId}`,
-        content: btoa(JSON.stringify(ticketOverrides, null, 2)),
+        content: btoa(newContent),
         sha: sha
       })
     });
+    
+    if (!saveRes.ok) {
+      const errorText = await saveRes.text();
+      throw new Error(`GitHub save failed: ${saveRes.status} - ${errorText}`);
+    }
+    
+    const saveResult = await saveRes.json();
+    console.log('✅ Saved to GitHub, new SHA:', saveResult.content.sha);
+    console.log('🔗 View on GitHub:', saveResult.content.html_url);
     
     alert(`✅ ${columnName} updated successfully!`);
     
@@ -661,6 +724,7 @@ async function editCell(ticketId, columnName, currentValue) {
         'updated': 7
       };
       tickets[ticketIndex][columnMap[columnName]] = newValue;
+      console.log('✅ Updated local ticket data at index', ticketIndex);
     }
     
     // Re-analyze and re-render
@@ -675,6 +739,7 @@ async function editCell(ticketId, columnName, currentValue) {
     renderTickets();
     populateFilters();
   } catch (error) {
+    console.error('❌ Error saving:', error);
     alert('❌ Error saving: ' + error.message);
   }
 }
