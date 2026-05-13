@@ -239,6 +239,7 @@ let ticketOverrides = {}; // Changed from statusOverrides to store all column ed
 let analytics = {};
 let sortColumn = -1;
 let sortAscending = true;
+let chartInstances = {}; // Track chart instances for cleanup
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -381,6 +382,12 @@ function analyzeData() {
 }
 
 function renderAnalysis() {
+  // Destroy existing charts
+  if (chartInstances.status) chartInstances.status.destroy();
+  if (chartInstances.priority) chartInstances.priority.destroy();
+  if (chartInstances.category) chartInstances.category.destroy();
+  if (chartInstances.aging) chartInstances.aging.destroy();
+  
   // KPIs
   document.getElementById('kpi-total').textContent = analytics.total;
   document.getElementById('kpi-critical').textContent = analytics.criticalQueue;
@@ -427,10 +434,10 @@ function renderAnalysis() {
     <li><strong>Team Capacity:</strong> ${Object.keys(analytics.byAgent).length} active agents. Top agent: ${topAgent?.[0]} (${topAgent?.[1]?.total} tickets).</li>
   `;
   
-  // Charts
+  // Charts - store instances for cleanup
   const statusLabels = Object.keys(analytics.byStatus);
   const statusData = Object.values(analytics.byStatus);
-  new Chart(document.getElementById('statusChart'), {
+  chartInstances.status = new Chart(document.getElementById('statusChart'), {
     type: 'bar',
     data: {
       labels: statusLabels,
@@ -441,7 +448,7 @@ function renderAnalysis() {
   
   const priorityLabels = Object.keys(analytics.byPriority);
   const priorityData = Object.values(analytics.byPriority);
-  new Chart(document.getElementById('priorityChart'), {
+  chartInstances.priority = new Chart(document.getElementById('priorityChart'), {
     type: 'doughnut',
     data: {
       labels: priorityLabels,
@@ -452,7 +459,7 @@ function renderAnalysis() {
   
   const categoryLabels = Object.keys(analytics.byCategory);
   const categoryData = Object.values(analytics.byCategory);
-  new Chart(document.getElementById('categoryChart'), {
+  chartInstances.category = new Chart(document.getElementById('categoryChart'), {
     type: 'pie',
     data: {
       labels: categoryLabels,
@@ -462,7 +469,7 @@ function renderAnalysis() {
   });
   
   const agingData = [analytics.aging['0-7'], analytics.aging['8-14'], analytics.aging['15-30'], analytics.aging['31+']];
-  new Chart(document.getElementById('agingChart'), {
+  chartInstances.aging = new Chart(document.getElementById('agingChart'), {
     type: 'bar',
     data: {
       labels: ['0-7 days', '8-14 days', '15-30 days', '31+ days'],
@@ -657,7 +664,13 @@ async function editCell(ticketId, columnName, currentValue) {
     
     // Re-analyze and re-render
     analyzeData();
-    renderAnalysis();
+    
+    // Only re-render analysis if we're on that tab
+    const analysisSection = document.getElementById('analysis-section');
+    if (analysisSection.classList.contains('active')) {
+      renderAnalysis();
+    }
+    
     renderTickets();
     populateFilters();
   } catch (error) {
