@@ -285,16 +285,15 @@ async function loadData() {
     
     console.log('🔄 Loading data from GitHub...');
     
-    // Fetch CSV - use raw URL to bypass API caching
-    const csvUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/data/open_with_us_tickets.csv${cacheBuster}`;
+    // Fetch CSV - GitHub API has CORS headers
+    const csvUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/open_with_us_tickets.csv${cacheBuster}`;
     console.log('📥 Fetching CSV from:', csvUrl);
     
     const csvRes = await fetch(csvUrl, {
       headers: { 
         'Authorization': `token ${GITHUB_TOKEN}`,
         'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
+        'Pragma': 'no-cache'
       }
     });
     
@@ -302,7 +301,8 @@ async function loadData() {
       throw new Error(`CSV fetch failed: ${csvRes.status} ${csvRes.statusText}`);
     }
     
-    const csvContent = await csvRes.text();
+    const csvFile = await csvRes.json();
+    const csvContent = atob(csvFile.content);
     console.log('✅ CSV loaded, size:', csvContent.length, 'bytes');
     
     // Parse CSV
@@ -320,17 +320,16 @@ async function loadData() {
     
     console.log('✅ Parsed', tickets.length, 'tickets from CSV');
     
-    // Fetch status overrides - use raw URL
+    // Fetch status overrides - GitHub API with cache-busting
     try {
-      const jsonUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/data/ticket_status.json${cacheBuster}`;
+      const jsonUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json${cacheBuster}`;
       console.log('📥 Fetching overrides from:', jsonUrl);
       
       const statusRes = await fetch(jsonUrl, {
         headers: { 
           'Authorization': `token ${GITHUB_TOKEN}`,
           'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
+          'Pragma': 'no-cache'
         }
       });
       
@@ -338,9 +337,11 @@ async function loadData() {
         throw new Error(`JSON fetch failed: ${statusRes.status}`);
       }
       
-      const jsonText = await statusRes.text();
+      const statusFile = await statusRes.json();
+      const jsonText = atob(statusFile.content);
       console.log('✅ JSON loaded, size:', jsonText.length, 'bytes');
       console.log('📄 JSON content preview:', jsonText.substring(0, 200));
+      console.log('📅 JSON last modified:', statusFile.commit?.committer?.date || 'unknown');
       
       ticketOverrides = JSON.parse(jsonText);
       console.log('✅ Loaded overrides for', Object.keys(ticketOverrides).length, 'tickets');
