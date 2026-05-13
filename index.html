@@ -102,6 +102,49 @@ tr:hover { background: #f9fafb; }
 .config { background: white; padding: 2rem; border-radius: 12px; max-width: 600px; margin: 2rem auto; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
 .config input { width: 100%; margin-bottom: 1rem; }
 .config button { width: 100%; }
+
+/* Multi-select dropdown */
+.multi-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 2px solid #3b82f6;
+  border-radius: 8px;
+  margin-top: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  z-index: 100;
+}
+
+.multi-select-item {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.multi-select-item:hover {
+  background: #f0f9ff;
+}
+
+.multi-select-item input[type="checkbox"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+}
+
+.multi-select-item label {
+  cursor: pointer;
+  flex: 1;
+  user-select: none;
+  font-size: 14px;
+}
+
 </style>
 </head>
 <body>
@@ -197,15 +240,25 @@ tr:hover { background: #f9fafb; }
 <h2 class="section-title">All Tickets</h2>
 <div class="controls">
 <input type="text" id="search" placeholder="Search ticket ID, subject, agent..." class="search-input">
-<select id="status-filter"><option value="">All Status</option></select>
-<select id="priority-filter">
-<option value="">All Priority</option>
-<option value="P0">P0 Critical</option>
-<option value="P1">P1 Critical</option>
-<option value="P2">P2 High</option>
-<option value="P3">P3 Normal</option>
-</select>
-<select id="agent-filter"><option value="">All Agents</option></select>
+<div style="position: relative;">
+<button id="status-filter-btn" onclick="toggleMultiSelect('status')" style="padding: 12px 16px; text-align: left; min-width: 150px; background: white; color: #111; border: 2px solid #e5e7eb;">
+Status: All <span style="float: right;">▼</span>
+</button>
+<div id="status-filter-dropdown" class="multi-select-dropdown" style="display: none;"></div>
+</div>
+<div style="position: relative;">
+<button id="priority-filter-btn" onclick="toggleMultiSelect('priority')" style="padding: 12px 16px; text-align: left; min-width: 150px; background: white; color: #111; border: 2px solid #e5e7eb;">
+Priority: All <span style="float: right;">▼</span>
+</button>
+<div id="priority-filter-dropdown" class="multi-select-dropdown" style="display: none;"></div>
+</div>
+<div style="position: relative;">
+<button id="agent-filter-btn" onclick="toggleMultiSelect('agent')" style="padding: 12px 16px; text-align: left; min-width: 150px; background: white; color: #111; border: 2px solid #e5e7eb;">
+Agent: All <span style="float: right;">▼</span>
+</button>
+<div id="agent-filter-dropdown" class="multi-select-dropdown" style="display: none;"></div>
+</div>
+<button onclick="clearAllFilters()" style="background: white; color: #6b7280; border: 2px solid #e5e7eb;">✕ Clear</button>
 <button onclick="exportCSV()">📥 Export CSV</button>
 <button onclick="openAllTickets()" style="background: linear-gradient(135deg, #059669 0%, #047857 100%);">🔗 Open All Tickets</button>
 <button onclick="refreshData()" style="background: white; color: #3b82f6; border: 2px solid #3b82f6;">🔄 Refresh</button>
@@ -236,6 +289,18 @@ tr:hover { background: #f9fafb; }
 </table>
 </div>
 </div>
+
+<!-- Edit Modal -->
+<div id="edit-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+<div style="background: white; padding: 2rem; border-radius: 16px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+<h3 style="margin-bottom: 1.5rem; font-size: 18px; font-weight: 600;">Edit <span id="edit-field-name"></span></h3>
+<div id="edit-modal-content"></div>
+<div style="display: flex; gap: 12px; margin-top: 1.5rem;">
+<button onclick="saveEdit()" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">💾 Save</button>
+<button onclick="closeEditModal()" style="flex: 1; padding: 12px; background: #f3f4f6; color: #374151; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">Cancel</button>
+</div>
+</div>
+</div>
 </div>
 </div>
 
@@ -249,6 +314,26 @@ let analytics = {};
 let sortColumn = -1;
 let sortAscending = true;
 let chartInstances = {}; // Track chart instances for cleanup
+
+// Multi-select filter state
+let selectedFilters = {
+  status: [],
+  priority: [],
+  agent: []
+};
+
+// Unique values from CSV
+let uniqueValues = {
+  statuses: [],
+  priorities: [],
+  agents: [],
+  categories: []
+};
+
+// Edit modal state
+let currentEditTicket = null;
+let currentEditColumn = null;
+let currentEditValue = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -348,6 +433,23 @@ async function loadData() {
       console.log('📅 JSON last modified:', statusFile.commit?.committer?.date || 'unknown');
       
       ticketOverrides = JSON.parse(jsonText);
+      
+      // Migrate old format (string) to new format (object)
+      let migrationNeeded = false;
+      Object.keys(ticketOverrides).forEach(ticketId => {
+        if (typeof ticketOverrides[ticketId] === 'string') {
+          console.log(`🔄 Migrating old format for ${ticketId}: "${ticketOverrides[ticketId]}" → {status: "${ticketOverrides[ticketId]}"}`);
+          ticketOverrides[ticketId] = {
+            status: ticketOverrides[ticketId]
+          };
+          migrationNeeded = true;
+        }
+      });
+      
+      if (migrationNeeded) {
+        console.log('⚠️ Old format detected - will save migrated version on next edit');
+      }
+      
       console.log('✅ Loaded overrides for', Object.keys(ticketOverrides).length, 'tickets');
       console.log('📋 Override tickets:', Object.keys(ticketOverrides));
       
@@ -600,45 +702,124 @@ function sortTable(columnIndex) {
 
 function filterTickets() {
   const search = document.getElementById('search').value.toLowerCase();
-  const status = document.getElementById('status-filter').value;
-  const priority = document.getElementById('priority-filter').value;
-  const agent = document.getElementById('agent-filter').value;
   
   return tickets.filter(ticket => {
     const [id, subject, ag, st, pr] = ticket;
     
     const matchSearch = id.toLowerCase().includes(search) || subject.toLowerCase().includes(search) || ag.toLowerCase().includes(search);
-    const matchStatus = !status || st.includes(status);
-    const matchPriority = !priority || pr.includes(priority);
-    const matchAgent = !agent || ag === agent;
+    const matchStatus = selectedFilters.status.length === 0 || selectedFilters.status.includes(st);
+    const matchPriority = selectedFilters.priority.length === 0 || selectedFilters.priority.includes(pr);
+    const matchAgent = selectedFilters.agent.length === 0 || selectedFilters.agent.includes(ag);
     
     return matchSearch && matchStatus && matchPriority && matchAgent;
   });
 }
 
 function populateFilters() {
-  const statusFilter = document.getElementById('status-filter');
-  const agentFilter = document.getElementById('agent-filter');
+  // Extract unique values
+  uniqueValues.statuses = [...new Set(tickets.map(t => t[3]))].filter(Boolean).sort();
+  uniqueValues.priorities = [...new Set(tickets.map(t => t[4]))].filter(Boolean).sort();
+  uniqueValues.agents = [...new Set(tickets.map(t => t[2]))].filter(Boolean).sort();
+  uniqueValues.categories = [...new Set(tickets.map(t => t[5]))].filter(Boolean).sort();
   
-  // Clear existing options except first
-  statusFilter.innerHTML = '<option value="">All Status</option>';
-  agentFilter.innerHTML = '<option value="">All Agents</option>';
+  // Populate multi-select dropdowns
+  populateMultiSelect('status', uniqueValues.statuses);
+  populateMultiSelect('priority', uniqueValues.priorities);
+  populateMultiSelect('agent', uniqueValues.agents);
+}
+
+function populateMultiSelect(filterType, values) {
+  const dropdown = document.getElementById(`${filterType}-filter-dropdown`);
+  dropdown.innerHTML = '';
   
-  const statuses = [...new Set(tickets.map(t => t[3]))].filter(Boolean).sort();
-  statuses.forEach(s => {
-    const opt = document.createElement('option');
-    opt.value = s;
-    opt.textContent = s;
-    statusFilter.appendChild(opt);
+  values.forEach(value => {
+    const item = document.createElement('div');
+    item.className = 'multi-select-item';
+    
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = `${filterType}-${value.replace(/\s/g, '_')}`;
+    checkbox.value = value;
+    checkbox.checked = selectedFilters[filterType].includes(value);
+    checkbox.onchange = () => updateMultiSelectFilter(filterType, value, checkbox.checked);
+    
+    const label = document.createElement('label');
+    label.htmlFor = checkbox.id;
+    label.textContent = value;
+    
+    item.appendChild(checkbox);
+    item.appendChild(label);
+    dropdown.appendChild(item);
   });
+}
+
+function toggleMultiSelect(filterType) {
+  const dropdown = document.getElementById(`${filterType}-filter-dropdown`);
+  const isVisible = dropdown.style.display === 'block';
   
-  const agents = [...new Set(tickets.map(t => t[2]))].filter(Boolean).sort();
-  agents.forEach(a => {
-    const opt = document.createElement('option');
-    opt.value = a;
-    opt.textContent = a;
-    agentFilter.appendChild(opt);
-  });
+  // Close all dropdowns
+  document.querySelectorAll('.multi-select-dropdown').forEach(d => d.style.display = 'none');
+  
+  // Toggle clicked dropdown
+  dropdown.style.display = isVisible ? 'none' : 'block';
+  
+  // Close dropdown when clicking outside
+  if (!isVisible) {
+    setTimeout(() => {
+      document.addEventListener('click', function closeDropdown(e) {
+        if (!e.target.closest(`#${filterType}-filter-btn`) && !e.target.closest(`#${filterType}-filter-dropdown`)) {
+          dropdown.style.display = 'none';
+          document.removeEventListener('click', closeDropdown);
+        }
+      });
+    }, 100);
+  }
+}
+
+function updateMultiSelectFilter(filterType, value, checked) {
+  if (checked) {
+    if (!selectedFilters[filterType].includes(value)) {
+      selectedFilters[filterType].push(value);
+    }
+  } else {
+    selectedFilters[filterType] = selectedFilters[filterType].filter(v => v !== value);
+  }
+  
+  updateFilterButtonLabel(filterType);
+  renderTickets();
+}
+
+function updateFilterButtonLabel(filterType) {
+  const btn = document.getElementById(`${filterType}-filter-btn`);
+  const count = selectedFilters[filterType].length;
+  const label = filterType.charAt(0).toUpperCase() + filterType.slice(1);
+  
+  if (count === 0) {
+    btn.innerHTML = `${label}: All <span style="float: right;">▼</span>`;
+  } else if (count === 1) {
+    const value = selectedFilters[filterType][0];
+    const shortValue = value.length > 15 ? value.substring(0, 15) + '...' : value;
+    btn.innerHTML = `${label}: ${shortValue} <span style="float: right;">▼</span>`;
+  } else {
+    btn.innerHTML = `${label}: ${count} selected <span style="float: right;">▼</span>`;
+  }
+}
+
+function clearAllFilters() {
+  selectedFilters.status = [];
+  selectedFilters.priority = [];
+  selectedFilters.agent = [];
+  
+  document.getElementById('search').value = '';
+  
+  updateFilterButtonLabel('status');
+  updateFilterButtonLabel('priority');
+  updateFilterButtonLabel('agent');
+  
+  // Uncheck all checkboxes
+  document.querySelectorAll('.multi-select-dropdown input[type="checkbox"]').forEach(cb => cb.checked = false);
+  
+  renderTickets();
 }
 
 function getStatusBadgeClass(status) {
@@ -664,13 +845,113 @@ async function editCell(ticketId, columnName, currentValue) {
   textarea.innerHTML = currentValue;
   const unescapedValue = textarea.value;
   
-  const newValue = prompt(`Edit ${columnName}:`, unescapedValue);
-  if (newValue === null || newValue === unescapedValue) return;
+  currentEditTicket = ticketId;
+  currentEditColumn = columnName;
+  currentEditValue = unescapedValue;
   
-  console.log(`💾 Saving ${columnName} for ${ticketId}: "${unescapedValue}" → "${newValue}"`);
+  // Show modal
+  const modal = document.getElementById('edit-modal');
+  const fieldName = document.getElementById('edit-field-name');
+  const modalContent = document.getElementById('edit-modal-content');
+  
+  fieldName.textContent = columnName.charAt(0).toUpperCase() + columnName.slice(1);
+  modal.style.display = 'flex';
+  
+  // Create appropriate input
+  if (columnName === 'status') {
+    const select = document.createElement('select');
+    select.id = 'edit-value-input';
+    select.style.cssText = 'width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px;';
+    uniqueValues.statuses.forEach(status => {
+      const option = document.createElement('option');
+      option.value = status;
+      option.textContent = status;
+      option.selected = status === unescapedValue;
+      select.appendChild(option);
+    });
+    modalContent.innerHTML = '';
+    modalContent.appendChild(select);
+    select.focus();
+  } else if (columnName === 'agent') {
+    const select = document.createElement('select');
+    select.id = 'edit-value-input';
+    select.style.cssText = 'width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px;';
+    uniqueValues.agents.forEach(agent => {
+      const option = document.createElement('option');
+      option.value = agent;
+      option.textContent = agent;
+      option.selected = agent === unescapedValue;
+      select.appendChild(option);
+    });
+    modalContent.innerHTML = '';
+    modalContent.appendChild(select);
+    select.focus();
+  } else if (columnName === 'priority') {
+    const select = document.createElement('select');
+    select.id = 'edit-value-input';
+    select.style.cssText = 'width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px;';
+    uniqueValues.priorities.forEach(priority => {
+      const option = document.createElement('option');
+      option.value = priority;
+      option.textContent = priority;
+      option.selected = priority === unescapedValue;
+      select.appendChild(option);
+    });
+    modalContent.innerHTML = '';
+    modalContent.appendChild(select);
+    select.focus();
+  } else if (columnName === 'category') {
+    const select = document.createElement('select');
+    select.id = 'edit-value-input';
+    select.style.cssText = 'width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px;';
+    uniqueValues.categories.forEach(category => {
+      const option = document.createElement('option');
+      option.value = category;
+      option.textContent = category;
+      option.selected = category === unescapedValue;
+      select.appendChild(option);
+    });
+    modalContent.innerHTML = '';
+    modalContent.appendChild(select);
+    select.focus();
+  } else {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'edit-value-input';
+    input.value = unescapedValue;
+    input.style.cssText = 'width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px;';
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') saveEdit();
+      if (e.key === 'Escape') closeEditModal();
+    };
+    modalContent.innerHTML = '';
+    modalContent.appendChild(input);
+    input.focus();
+  }
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').style.display = 'none';
+  currentEditTicket = null;
+  currentEditColumn = null;
+  currentEditValue = null;
+}
+
+async function saveEdit() {
+  const input = document.getElementById('edit-value-input');
+  const newValue = input.value.trim();
+  
+  if (!newValue || newValue === currentEditValue) {
+    closeEditModal();
+    return;
+  }
+  
+  const ticketId = currentEditTicket;
+  const columnName = currentEditColumn;
+  
+  console.log(`💾 Saving ${columnName} for ${ticketId}: "${currentEditValue}" → "${newValue}"`);
   
   try {
-    // Get current file
     let sha = null;
     try {
       const res = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
@@ -678,25 +959,23 @@ async function editCell(ticketId, columnName, currentValue) {
       });
       const file = await res.json();
       ticketOverrides = JSON.parse(atob(file.content));
+      Object.keys(ticketOverrides).forEach(id => {
+        if (typeof ticketOverrides[id] === 'string') {
+          ticketOverrides[id] = { status: ticketOverrides[id] };
+        }
+      });
       sha = file.sha;
-      console.log('📥 Fetched existing overrides, SHA:', sha);
     } catch (e) {
-      console.log('ℹ️ Creating new overrides file');
       ticketOverrides = {};
     }
     
-    // Update
     if (!ticketOverrides[ticketId]) {
       ticketOverrides[ticketId] = {};
     }
     ticketOverrides[ticketId][columnName] = newValue;
     
-    console.log('📝 Updated override object:', ticketOverrides[ticketId]);
-    
     const newContent = JSON.stringify(ticketOverrides, null, 2);
-    console.log('📄 Saving JSON (first 500 chars):', newContent.substring(0, 500));
     
-    // Save to GitHub
     const saveRes = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
       method: 'PUT',
       headers: {
@@ -715,32 +994,16 @@ async function editCell(ticketId, columnName, currentValue) {
       throw new Error(`GitHub save failed: ${saveRes.status} - ${errorText}`);
     }
     
-    const saveResult = await saveRes.json();
-    console.log('✅ Saved to GitHub, new SHA:', saveResult.content.sha);
-    console.log('🔗 View on GitHub:', saveResult.content.html_url);
-    
+    closeEditModal();
     alert(`✅ ${columnName} updated successfully!`);
     
-    // Update local ticket data immediately
     const ticketIndex = tickets.findIndex(t => t[0] === ticketId);
     if (ticketIndex >= 0) {
-      const columnMap = {
-        'subject': 1,
-        'agent': 2,
-        'status': 3,
-        'priority': 4,
-        'category': 5,
-        'created': 6,
-        'updated': 7
-      };
+      const columnMap = { 'subject': 1, 'agent': 2, 'status': 3, 'priority': 4, 'category': 5, 'created': 6, 'updated': 7 };
       tickets[ticketIndex][columnMap[columnName]] = newValue;
-      console.log('✅ Updated local ticket data at index', ticketIndex);
     }
     
-    // Re-analyze and re-render
     analyzeData();
-    
-    // Only re-render analysis if we're on that tab
     const analysisSection = document.getElementById('analysis-section');
     if (analysisSection.classList.contains('active')) {
       renderAnalysis();
@@ -749,11 +1012,11 @@ async function editCell(ticketId, columnName, currentValue) {
     renderTickets();
     populateFilters();
     
-    // Update debug panel if visible
     if (document.getElementById('debug-panel').style.display === 'block') {
       updateDebugPanel();
     }
   } catch (error) {
+    closeEditModal();
     console.error('❌ Error saving:', error);
     alert('❌ Error saving: ' + error.message);
   }
@@ -892,9 +1155,6 @@ function updateDebugPanel() {
 
 // Attach filter handlers
 document.getElementById('search').addEventListener('input', renderTickets);
-document.getElementById('status-filter').addEventListener('change', renderTickets);
-document.getElementById('priority-filter').addEventListener('change', renderTickets);
-document.getElementById('agent-filter').addEventListener('change', renderTickets);
 </script>
 </body>
 </html>
