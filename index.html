@@ -335,6 +335,35 @@ let currentEditTicket = null;
 let currentEditColumn = null;
 let currentEditValue = null;
 
+// Refresh cooldown tracking (30 minutes)
+const REFRESH_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+const REFRESH_LOG_KEY = 'happyFox_refresh_log';
+
+function getRefreshLog() {
+  try {
+    const log = localStorage.getItem(REFRESH_LOG_KEY);
+    return log ? JSON.parse(log) : {};
+  } catch {
+    return {};
+  }
+}
+
+function updateRefreshLog(ticketIds) {
+  const log = getRefreshLog();
+  const now = Date.now();
+  ticketIds.forEach(id => {
+    log[id] = now;
+  });
+  localStorage.setItem(REFRESH_LOG_KEY, JSON.stringify(log));
+}
+
+function canRefreshTicket(ticketId) {
+  const log = getRefreshLog();
+  const lastRefresh = log[ticketId];
+  if (!lastRefresh) return true;
+  return (Date.now() - lastRefresh) >= REFRESH_COOLDOWN_MS;
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   const config = localStorage.getItem(CONFIG_KEY);
@@ -1074,9 +1103,233 @@ function openAllTickets() {
 }
 
 function refreshData() {
-  document.getElementById('loading').style.display = 'flex';
-  document.getElementById('dashboard').style.display = 'none';
-  loadData();
+  // Show prompt for HappyFox credentials
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000; display: flex; align-items: center; justify-content: center;';
+  
+  modal.innerHTML = `
+    <div style="background: white; padding: 2rem; border-radius: 16px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+      <h3 style="margin-bottom: 1.5rem; font-size: 18px; font-weight: 600;">🔄 Sync from HappyFox</h3>
+      <p style="margin-bottom: 1rem; color: #6b7280; font-size: 14px;">Enter HappyFox API credentials to sync latest status and assignees for filtered tickets.</p>
+      
+      <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 14px;">Domain (e.g., askdarwin.darwinbox.com)</label>
+      <input type="text" id="hf-domain" placeholder="askdarwin.darwinbox.com" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; margin-bottom: 1rem;" />
+      
+      <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 14px;">Basic Auth Token</label>
+      <input type="password" id="hf-auth" placeholder="Paste Basic Auth string" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; margin-bottom: 1.5rem;" />
+      
+      <div style="display: flex; gap: 12px;">
+        <button onclick="startHappyFoxSync()" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">🚀 Start Sync</button>
+        <button onclick="this.closest('div').parentElement.remove()" style="flex: 1; padding: 12px; background: #f3f4f6; color: #374151; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">Cancel</button>
+      </div>
+      
+      <div id="sync-progress" style="display: none; margin-top: 1.5rem;">
+        <div style="margin-bottom: 0.5rem; font-weight: 600; font-size: 14px; color: #3b82f6;">Syncing tickets...</div>
+        <div style="background: #e5e7eb; height: 8px; border-radius: 4px; overflow: hidden;">
+          <div id="sync-progress-bar" style="height: 100%; background: linear-gradient(90deg, #3b82f6, #2563eb); width: 0%; transition: width 0.3s;"></div>
+        </div>
+        <div id="sync-status" style="margin-top: 0.5rem; font-size: 12px; color: #6b7280;"></div>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+}
+
+async function startHappyFoxSync() {
+  const domain = document.getElementById('hf-domain').value.trim();
+  const authToken = document.getElementById('hf-auth').value.trim();
+  
+  if (!domain || !authToken) {
+    alert('❌ Please fill in both domain and auth token');
+    return;
+  }
+  
+  // Get filtered tickets
+  const filteredTickets = filterTickets();
+  
+  if (filteredTickets.length === 0) {
+    alert('❌ No tickets to sync. Adjust your filters.');
+    return;
+  }
+  
+  // Check cooldown
+  const eligibleTickets = filteredTickets.filter(t => canRefreshTicket(t[0]));
+  const cooledDown = filteredTickets.filter(t => !canRefreshTicket(t[0]));
+  
+  if (eligibleTickets.length === 0) {
+    alert(`❌ All ${filteredTickets.length} filtered tickets were synced in the last 30 minutes.\n\nPlease wait before syncing again.`);
+    return;
+  }
+  
+  if (cooledDown.length > 0) {
+    const proceed = confirm(`⚠️ ${cooledDown.length} ticket(s) were synced recently and will be skipped.\n\nSync ${eligibleTickets.length} eligible tickets?`);
+    if (!proceed) return;
+  }
+  
+  // Show progress
+  document.getElementById('sync-progress').style.display = 'block';
+  document.querySelector('button[onclick="startHappyFoxSync()"]').disabled = true;
+  
+  const results = {
+    total: eligibleTickets.length,
+    success: 0,
+    failed: 0,
+    unchanged: 0,
+    errors: []
+  };
+  
+  console.log(`🔄 Starting sync for ${eligibleTickets.length} tickets...`);
+  
+  // Fetch tickets with delay
+  for (let i = 0; i < eligibleTickets.length; i++) {
+    const ticket = eligibleTickets[i];
+    const ticketId = ticket[0];
+    const strippedId = ticketId.replace(/^#(INT|DBS)/, '');
+    
+    const progress = Math.round(((i + 1) / eligibleTickets.length) * 100);
+    document.getElementById('sync-progress-bar').style.width = progress + '%';
+    document.getElementById('sync-status').textContent = `Processing ${i + 1}/${eligibleTickets.length}: ${ticketId}`;
+    
+    try {
+      const url = `https://${domain}/api/1.1/json/ticket/${strippedId}/?minify_response=true`;
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Basic ${authToken}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Extract status and assigned agent
+      const newStatus = data.status?.name || ticket[3];
+      const newAgent = data.assigned_to?.name || ticket[2];
+      
+      // Check if changed
+      if (newStatus !== ticket[3] || newAgent !== ticket[2]) {
+        if (!ticketOverrides[ticketId]) {
+          ticketOverrides[ticketId] = {};
+        }
+        
+        if (newStatus !== ticket[3]) {
+          ticketOverrides[ticketId].status = newStatus;
+        }
+        if (newAgent !== ticket[2]) {
+          ticketOverrides[ticketId].agent = newAgent;
+        }
+        
+        // Update local ticket data
+        const ticketIndex = tickets.findIndex(t => t[0] === ticketId);
+        if (ticketIndex >= 0) {
+          tickets[ticketIndex][3] = newStatus;
+          tickets[ticketIndex][2] = newAgent;
+        }
+        
+        results.success++;
+        console.log(`✅ ${ticketId}: Updated status="${newStatus}" agent="${newAgent}"`);
+      } else {
+        results.unchanged++;
+        console.log(`ℹ️ ${ticketId}: No changes`);
+      }
+      
+    } catch (error) {
+      results.failed++;
+      results.errors.push({ ticketId, error: error.message });
+      console.error(`❌ ${ticketId}: ${error.message}`);
+    }
+    
+    // Delay between requests (200ms)
+    if (i < eligibleTickets.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+  
+  console.log('📊 Sync complete:', results);
+  
+  // Save to GitHub if there were changes
+  if (results.success > 0) {
+    document.getElementById('sync-status').textContent = 'Saving to GitHub...';
+    
+    try {
+      let sha = null;
+      try {
+        const res = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
+          headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+        });
+        const file = await res.json();
+        const existing = JSON.parse(atob(file.content));
+        
+        // Merge with existing
+        Object.keys(existing).forEach(id => {
+          if (!ticketOverrides[id]) {
+            ticketOverrides[id] = existing[id];
+          }
+        });
+        
+        sha = file.sha;
+      } catch (e) {
+        console.log('Creating new ticket_status.json');
+      }
+      
+      const saveRes = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `token ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: `HappyFox sync: Updated ${results.success} ticket(s)`,
+          content: btoa(JSON.stringify(ticketOverrides, null, 2)),
+          sha: sha
+        })
+      });
+      
+      if (!saveRes.ok) {
+        throw new Error('GitHub save failed');
+      }
+      
+      console.log('✅ Saved to GitHub');
+    } catch (error) {
+      console.error('❌ GitHub save error:', error);
+      alert('⚠️ Sync completed but failed to save to GitHub. Changes are local only.');
+    }
+  }
+  
+  // Update refresh log
+  updateRefreshLog(eligibleTickets.map(t => t[0]));
+  
+  // Refresh UI
+  analyzeData();
+  const analysisSection = document.getElementById('analysis-section');
+  if (analysisSection.classList.contains('active')) {
+    renderAnalysis();
+  }
+  renderTickets();
+  populateFilters();
+  
+  // Show summary
+  let summary = `✅ Sync Complete!\n\n`;
+  summary += `Updated: ${results.success}\n`;
+  summary += `Unchanged: ${results.unchanged}\n`;
+  if (results.failed > 0) {
+    summary += `Failed: ${results.failed}\n\n`;
+    summary += `Failed tickets:\n`;
+    results.errors.slice(0, 5).forEach(e => {
+      summary += `• ${e.ticketId}: ${e.error}\n`;
+    });
+    if (results.errors.length > 5) {
+      summary += `... and ${results.errors.length - 5} more`;
+    }
+  }
+  
+  alert(summary);
+  
+  // Close modal
+  document.querySelector('div[style*="position: fixed"]').remove();
 }
 
 function toggleDebug() {
