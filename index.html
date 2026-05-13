@@ -1,1 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Integration Tickets Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(135deg, #f5f7fa 0%, #e8edf3 100%); color: #111827; }
 
+/* Header */
+.header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: white; padding: 2rem; box-shadow: 0 4px 20px rgba(30, 64, 175, 0.3); }
+.header h1 { font-size: 32px; font-weight: 700; margin-bottom: 0.5rem; }
+.subtitle { font-size: 14px; opacity: 0.95; }
+
+/* Navigation */
+.nav { max-width: 1800px; margin: 0 auto; padding: 1.5rem 2rem 0; display: flex; gap: 1rem; }
+.nav-btn { padding: 1rem 2rem; background: white; border: none; border-radius: 12px 12px 0 0; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); color: #6b7280; }
+.nav-btn:hover { background: #f9fafb; transform: translateY(-2px); }
+.nav-btn.active { background: white; color: #1e40af; box-shadow: 0 -4px 20px rgba(59, 130, 246, 0.15); }
+
+/* Main */
+.main { max-width: 1800px; margin: 0 auto; padding: 0 2rem 2rem; }
+.section { background: white; padding: 2.5rem; border-radius: 16px; margin-bottom: 2rem; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border: 1px solid #e5e7eb; display: none; }
+.section.active { display: block; }
+.section-title { font-size: 24px; font-weight: 700; margin-bottom: 2rem; }
+
+/* KPI Grid */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+.kpi-card { background: linear-gradient(135deg, #fafbfc 0%, white 100%); padding: 2rem; border-radius: 12px; border: 2px solid #e5e7eb; position: relative; overflow: hidden; transition: all 0.3s; }
+.kpi-card:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,0.12); }
+.kpi-card.critical { border-left: 4px solid #dc2626; }
+.kpi-card.warning { border-left: 4px solid #f59e0b; }
+.kpi-card.success { border-left: 4px solid #059669; }
+.kpi-card.info { border-left: 4px solid #3b82f6; }
+.kpi-label { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 1rem; }
+.kpi-value { font-size: 42px; font-weight: 800; color: #111827; line-height: 1; margin-bottom: 0.75rem; }
+.kpi-trend { font-size: 13px; color: #6b7280; }
+
+/* Alerts */
+.alerts { display: grid; gap: 1rem; margin-bottom: 2rem; }
+.alert { padding: 1.25rem 1.5rem; border-radius: 10px; border-left: 4px solid; display: flex; align-items: center; gap: 1rem; }
+.alert-critical { background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-color: #dc2626; }
+.alert-warning { background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-color: #f59e0b; }
+.alert-icon { font-size: 24px; }
+.alert-title { font-weight: 600; margin-bottom: 0.25rem; }
+.alert-desc { font-size: 14px; color: #6b7280; }
+
+/* Charts */
+.charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 2rem; margin-bottom: 2rem; }
+.chart-container { background: #fafbfc; padding: 1.5rem; border-radius: 12px; border: 1px solid #e5e7eb; }
+.chart-title { font-size: 16px; font-weight: 600; margin-bottom: 1rem; }
+.chart-wrapper { position: relative; height: 300px; }
+
+/* Insights */
+.insights { background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); padding: 2rem; border-radius: 12px; border: 2px solid #bae6fd; margin-bottom: 2rem; }
+.insights h3 { font-size: 18px; font-weight: 600; margin-bottom: 1rem; color: #0c4a6e; }
+.insights ul { list-style: none; display: grid; gap: 1rem; }
+.insights li { padding-left: 1.5rem; position: relative; line-height: 1.6; color: #334155; }
+.insights li::before { content: '▸'; position: absolute; left: 0; color: #3b82f6; font-weight: bold; }
+
+/* Table */
+.controls { display: flex; gap: 12px; margin-bottom: 1.5rem; flex-wrap: wrap; }
+input, select { padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 8px; font-family: inherit; font-size: 14px; }
+input:focus, select:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+button { padding: 12px 20px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; }
+button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4); }
+.search-input { flex: 1; min-width: 250px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; padding: 16px; border-bottom: 2px solid #e5e7eb; font-weight: 600; background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%); }
+td { padding: 16px; border-bottom: 1px solid #e5e7eb; }
+tr:hover { background: #f9fafb; }
+
+.ticket-link { color: #3b82f6; text-decoration: none; font-weight: 600; font-family: 'Courier New', monospace; }
+.ticket-link:hover { text-decoration: underline; }
+
+.badge { display: inline-block; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.badge:hover { opacity: 0.8; transform: scale(1.05); }
+.badge-open { background: #dbeafe; color: #1e40af; }
+.badge-reopened { background: #fef3c7; color: #92400e; }
+.badge-pending { background: #fed7aa; color: #92400e; }
+.badge-customer { background: #dcfce7; color: #166534; }
+.badge-inprogress { background: #dbeafe; color: #1e40af; }
+.badge-uat { background: #d1fae5; color: #065f46; }
+.badge-p0 { background: #fee2e2; color: #991b1b; font-weight: 700; }
+.badge-p1 { background: #fef3c7; color: #92400e; font-weight: 700; }
+.badge-p2 { background: #dbeafe; color: #1e40af; }
+.badge-p3 { background: #f3f4f6; color: #374151; }
+
+.edit-input { padding: 6px 8px; border: 2px solid #3b82f6; border-radius: 6px; font-size: 14px; width: 100%; }
+
+.loading { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 1rem; }
+.spinner { width: 50px; height: 50px; border: 4px solid #e5e7eb; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.config { background: white; padding: 2rem; border-radius: 12px; max-width: 600px; margin: 2rem auto; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+.config input { width: 100%; margin-bottom: 1rem; }
+.config button { width: 100%; }
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading">
+<div class="spinner"></div>
+<p>Loading dashboard...</p>
+</div>
+
+<div id="config" class="config" style="display: none;">
+<h2>⚙️ Configuration Required</h2>
+<p style="margin-bottom: 1.5rem; color: #6b7280;">Enter your GitHub details to load dashboard data:</p>
+<input type="text" id="github-owner" placeholder="GitHub Username" />
+<input type="text" id="github-repo" placeholder="Repository Name (e.g., tickets-data)" />
+<input type="password" id="github-token" placeholder="Personal Access Token" />
+<button onclick="saveConfig()">💾 Save & Load Dashboard</button>
+<p style="margin-top: 1rem; font-size: 12px; color: #6b7280;">Data is stored in localStorage. Token is never sent except to GitHub API.</p>
+</div>
+
+<div id="dashboard" style="display: none;">
+<div class="header">
+<h1>🎯 Integration Tickets Dashboard</h1>
+<p class="subtitle">Leadership Review & Operations Monitor • <span id="timestamp"></span></p>
+</div>
+
+<div class="nav">
+<button class="nav-btn active" onclick="switchTab('analysis')">📊 Executive Analysis</button>
+<button class="nav-btn" onclick="switchTab('tickets')">🎫 Tickets & Operations</button>
+</div>
+
+<div class="main">
+<!-- Analysis Section -->
+<div id="analysis-section" class="section active">
+<h2 class="section-title">Executive Summary</h2>
+<div class="kpi-grid">
+<div class="kpi-card info">
+<div class="kpi-label">Total Tickets</div>
+<div class="kpi-value" id="kpi-total">0</div>
+<div class="kpi-trend">Active in pipeline</div>
+</div>
+<div class="kpi-card critical">
+<div class="kpi-label">Critical Queue</div>
+<div class="kpi-value" id="kpi-critical">0</div>
+<div class="kpi-trend" id="kpi-critical-pct">P0 + P1</div>
+</div>
+<div class="kpi-card warning">
+<div class="kpi-label">Stale Tickets</div>
+<div class="kpi-value" id="kpi-stale">0</div>
+<div class="kpi-trend" id="kpi-stale-pct">No update 14+ days</div>
+</div>
+<div class="kpi-card success">
+<div class="kpi-label">Awaiting Client</div>
+<div class="kpi-value" id="kpi-client">0</div>
+<div class="kpi-trend">Ball in client's court</div>
+</div>
+<div class="kpi-card warning">
+<div class="kpi-label">Aging 31+ Days</div>
+<div class="kpi-value" id="kpi-aging">0</div>
+<div class="kpi-trend">Requires escalation</div>
+</div>
+</div>
+
+<div class="alerts" id="alerts"></div>
+
+<div class="insights">
+<h3>📋 Executive Insights</h3>
+<ul id="insights"></ul>
+</div>
+
+<h2 class="section-title">Distribution Analysis</h2>
+<div class="charts-grid">
+<div class="chart-container">
+<div class="chart-title">Status Distribution</div>
+<div class="chart-wrapper"><canvas id="statusChart"></canvas></div>
+</div>
+<div class="chart-container">
+<div class="chart-title">Priority Breakdown</div>
+<div class="chart-wrapper"><canvas id="priorityChart"></canvas></div>
+</div>
+<div class="chart-container">
+<div class="chart-title">Category Distribution</div>
+<div class="chart-wrapper"><canvas id="categoryChart"></canvas></div>
+</div>
+<div class="chart-container">
+<div class="chart-title">Ticket Aging Analysis</div>
+<div class="chart-wrapper"><canvas id="agingChart"></canvas></div>
+</div>
+</div>
+</div>
+
+<!-- Tickets Section -->
+<div id="tickets-section" class="section">
+<h2 class="section-title">All Tickets</h2>
+<div class="controls">
+<input type="text" id="search" placeholder="Search ticket ID, subject, agent..." class="search-input">
+<select id="status-filter"><option value="">All Status</option></select>
+<select id="priority-filter">
+<option value="">All Priority</option>
+<option value="P0">P0 Critical</option>
+<option value="P1">P1 Critical</option>
+<option value="P2">P2 High</option>
+<option value="P3">P3 Normal</option>
+</select>
+<select id="agent-filter"><option value="">All Agents</option></select>
+<button onclick="exportCSV()">📥 Export CSV</button>
+<button onclick="refreshData()" style="background: white; color: #3b82f6; border: 2px solid #3b82f6;">🔄 Refresh</button>
+</div>
+<div style="overflow-x: auto;">
+<table id="tickets-table">
+<thead>
+<tr>
+<th>Ticket ID</th>
+<th>Subject</th>
+<th>Agent</th>
+<th>Status</th>
+<th>Priority</th>
+<th>Category</th>
+<th>Created</th>
+<th>Updated</th>
+</tr>
+</thead>
+<tbody id="tickets-tbody"></tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+
+<script>
+// Configuration
+const CONFIG_KEY = 'github_config';
+let GITHUB_OWNER, GITHUB_REPO, GITHUB_TOKEN;
+let tickets = [];
+let statusOverrides = {};
+let analytics = {};
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+  const config = localStorage.getItem(CONFIG_KEY);
+  if (config) {
+    const parsed = JSON.parse(config);
+    GITHUB_OWNER = parsed.owner;
+    GITHUB_REPO = parsed.repo;
+    GITHUB_TOKEN = parsed.token;
+    loadData();
+  } else {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('config').style.display = 'block';
+  }
+});
+
+function saveConfig() {
+  GITHUB_OWNER = document.getElementById('github-owner').value.trim();
+  GITHUB_REPO = document.getElementById('github-repo').value.trim();
+  GITHUB_TOKEN = document.getElementById('github-token').value.trim();
+  
+  if (!GITHUB_OWNER || !GITHUB_REPO || !GITHUB_TOKEN) {
+    alert('Please fill all fields');
+    return;
+  }
+  
+  localStorage.setItem(CONFIG_KEY, JSON.stringify({
+    owner: GITHUB_OWNER,
+    repo: GITHUB_REPO,
+    token: GITHUB_TOKEN
+  }));
+  
+  document.getElementById('config').style.display = 'none';
+  document.getElementById('loading').style.display = 'flex';
+  loadData();
+}
+
+async function loadData() {
+  try {
+    // Fetch CSV
+    const csvRes = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/open_with_us_tickets.csv`, {
+      headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+    });
+    const csvFile = await csvRes.json();
+    const csvContent = atob(csvFile.content);
+    
+    // Parse CSV
+    const parsed = Papa.parse(csvContent, { header: true, skipEmptyLines: true });
+    tickets = parsed.data.map(row => [
+      row['Ticket ID'] || '',
+      row['Ticket Subject'] || '',
+      row['Assigned Agent Name'] || '',
+      row['Ticket Status'] || '',
+      row['Ticket Priority'] || '',
+      row['Ticket Category'] || '',
+      row['Created At'] || '',
+      row['Last Updated At'] || ''
+    ]);
+    
+    // Fetch status overrides
+    try {
+      const statusRes = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
+        headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+      });
+      const statusFile = await statusRes.json();
+      statusOverrides = JSON.parse(atob(statusFile.content));
+    } catch (e) {
+      statusOverrides = {};
+    }
+    
+    // Calculate analytics
+    analyzeData();
+    
+    // Render
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+    document.getElementById('timestamp').textContent = new Date().toLocaleString();
+    renderAnalysis();
+    renderTickets();
+    populateFilters();
+  } catch (error) {
+    document.getElementById('loading').innerHTML = `<div style="color: #dc2626;">❌ Error loading data: ${error.message}<br><br><button onclick="location.reload()">Retry</button><br><button onclick="localStorage.removeItem('${CONFIG_KEY}'); location.reload()" style="margin-top: 1rem; background: #6b7280;">Reconfigure</button></div>`;
+  }
+}
+
+function analyzeData() {
+  analytics = {
+    total: tickets.length,
+    byStatus: {},
+    byPriority: {},
+    byAgent: {},
+    byCategory: {},
+    aging: { '0-7': 0, '8-14': 0, '15-30': 0, '31+': 0 },
+    criticalQueue: 0,
+    staleTickets: 0
+  };
+  
+  tickets.forEach(ticket => {
+    const [id, subject, agent, status, priority, category, created, updated] = ticket;
+    const effectiveStatus = statusOverrides[id] || status;
+    
+    analytics.byStatus[effectiveStatus] = (analytics.byStatus[effectiveStatus] || 0) + 1;
+    analytics.byPriority[priority] = (analytics.byPriority[priority] || 0) + 1;
+    analytics.byCategory[category] = (analytics.byCategory[category] || 0) + 1;
+    
+    if (agent) {
+      if (!analytics.byAgent[agent]) analytics.byAgent[agent] = { total: 0 };
+      analytics.byAgent[agent].total++;
+    }
+    
+    const age = Math.floor((new Date() - new Date(created)) / (1000 * 60 * 60 * 24));
+    if (age <= 7) analytics.aging['0-7']++;
+    else if (age <= 14) analytics.aging['8-14']++;
+    else if (age <= 30) analytics.aging['15-30']++;
+    else analytics.aging['31+']++;
+    
+    if (priority.includes('P0') || priority.includes('P1')) analytics.criticalQueue++;
+    
+    const updatedAge = Math.floor((new Date() - new Date(updated)) / (1000 * 60 * 60 * 24));
+    if (updatedAge >= 14) analytics.staleTickets++;
+  });
+}
+
+function renderAnalysis() {
+  // KPIs
+  document.getElementById('kpi-total').textContent = analytics.total;
+  document.getElementById('kpi-critical').textContent = analytics.criticalQueue;
+  document.getElementById('kpi-stale').textContent = analytics.staleTickets;
+  document.getElementById('kpi-client').textContent = analytics.byStatus['Customer responded'] || 0;
+  document.getElementById('kpi-aging').textContent = analytics.aging['31+'];
+  
+  const critPct = ((analytics.criticalQueue / analytics.total) * 100).toFixed(1);
+  document.getElementById('kpi-critical-pct').textContent = `${critPct}% of total - P0 + P1`;
+  
+  // Alerts
+  const alertsDiv = document.getElementById('alerts');
+  alertsDiv.innerHTML = '';
+  if (analytics.criticalQueue > 0) {
+    alertsDiv.innerHTML += `
+      <div class="alert alert-critical">
+        <div class="alert-icon">🚨</div>
+        <div>
+          <div class="alert-title">Critical Priority Alert</div>
+          <div class="alert-desc">${analytics.criticalQueue} ticket(s) marked P0/P1 requiring immediate attention</div>
+        </div>
+      </div>
+    `;
+  }
+  if (analytics.staleTickets > 5) {
+    alertsDiv.innerHTML += `
+      <div class="alert alert-warning">
+        <div class="alert-icon">⚠️</div>
+        <div>
+          <div class="alert-title">Stale Tickets Detected</div>
+          <div class="alert-desc">${analytics.staleTickets} ticket(s) have not been updated in 14+ days</div>
+        </div>
+      </div>
+    `;
+  }
+  
+  // Insights
+  const insightsUl = document.getElementById('insights');
+  const topAgent = Object.entries(analytics.byAgent).sort((a,b) => b[1].total - a[1].total)[0];
+  insightsUl.innerHTML = `
+    <li><strong>Queue Health:</strong> ${analytics.total} active tickets with ${analytics.criticalQueue} critical priority items. ${analytics.criticalQueue > 10 ? '⚠️ Above threshold - recommend resource reallocation.' : '✅ Within acceptable range.'}</li>
+    <li><strong>Response Efficiency:</strong> ${analytics.byStatus['Customer responded'] || 0} tickets awaiting client feedback (${(((analytics.byStatus['Customer responded'] || 0) / analytics.total) * 100).toFixed(1)}% of pipeline).</li>
+    <li><strong>Aging Risk:</strong> ${analytics.aging['31+']} tickets open 31+ days. ${analytics.aging['31+'] > analytics.total * 0.15 ? '⚠️ 15%+ aging threshold exceeded - escalation needed.' : 'Trending within SLA.'}</li>
+    <li><strong>Team Capacity:</strong> ${Object.keys(analytics.byAgent).length} active agents. Top agent: ${topAgent?.[0]} (${topAgent?.[1]?.total} tickets).</li>
+  `;
+  
+  // Charts
+  const statusLabels = Object.keys(analytics.byStatus);
+  const statusData = Object.values(analytics.byStatus);
+  new Chart(document.getElementById('statusChart'), {
+    type: 'bar',
+    data: {
+      labels: statusLabels,
+      datasets: [{ label: 'Tickets', data: statusData, backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'] }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+  });
+  
+  const priorityLabels = Object.keys(analytics.byPriority);
+  const priorityData = Object.values(analytics.byPriority);
+  new Chart(document.getElementById('priorityChart'), {
+    type: 'doughnut',
+    data: {
+      labels: priorityLabels,
+      datasets: [{ data: priorityData, backgroundColor: ['#dc2626', '#f59e0b', '#3b82f6', '#9ca3af'] }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  });
+  
+  const categoryLabels = Object.keys(analytics.byCategory);
+  const categoryData = Object.values(analytics.byCategory);
+  new Chart(document.getElementById('categoryChart'), {
+    type: 'pie',
+    data: {
+      labels: categoryLabels,
+      datasets: [{ data: categoryData, backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'] }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  });
+  
+  const agingData = [analytics.aging['0-7'], analytics.aging['8-14'], analytics.aging['15-30'], analytics.aging['31+']];
+  new Chart(document.getElementById('agingChart'), {
+    type: 'bar',
+    data: {
+      labels: ['0-7 days', '8-14 days', '15-30 days', '31+ days'],
+      datasets: [{ label: 'Tickets', data: agingData, backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'] }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+  });
+}
+
+function renderTickets() {
+  const tbody = document.getElementById('tickets-tbody');
+  tbody.innerHTML = '';
+  
+  const filtered = filterTickets();
+  
+  filtered.forEach(ticket => {
+    const [id, subject, agent, status, priority, category, created, updated] = ticket;
+    const effectiveStatus = statusOverrides[id] || status;
+    const strippedId = id.replace(/^#(INT|DBS)/, '');
+    const ticketLink = `https://askdarwin.darwinbox.com/staff/ticket/${strippedId}`;
+    
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><a href="${ticketLink}" target="_blank" class="ticket-link">${id}</a></td>
+      <td>${subject}</td>
+      <td>${agent}</td>
+      <td><span class="badge ${getStatusBadgeClass(effectiveStatus)}" onclick="editStatus('${id}', '${effectiveStatus}')">${effectiveStatus}</span></td>
+      <td><span class="badge ${getPriorityBadgeClass(priority)}">${priority}</span></td>
+      <td>${category}</td>
+      <td>${created}</td>
+      <td>${updated}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function filterTickets() {
+  const search = document.getElementById('search').value.toLowerCase();
+  const status = document.getElementById('status-filter').value;
+  const priority = document.getElementById('priority-filter').value;
+  const agent = document.getElementById('agent-filter').value;
+  
+  return tickets.filter(ticket => {
+    const [id, subject, ag, st, pr] = ticket;
+    const effectiveStatus = statusOverrides[id] || st;
+    
+    const matchSearch = id.toLowerCase().includes(search) || subject.toLowerCase().includes(search) || ag.toLowerCase().includes(search);
+    const matchStatus = !status || effectiveStatus.includes(status);
+    const matchPriority = !priority || pr.includes(priority);
+    const matchAgent = !agent || ag === agent;
+    
+    return matchSearch && matchStatus && matchPriority && matchAgent;
+  });
+}
+
+function populateFilters() {
+  const statusFilter = document.getElementById('status-filter');
+  const agentFilter = document.getElementById('agent-filter');
+  
+  const statuses = [...new Set(tickets.map(t => statusOverrides[t[0]] || t[3]))].filter(Boolean).sort();
+  statuses.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    statusFilter.appendChild(opt);
+  });
+  
+  const agents = [...new Set(tickets.map(t => t[2]))].filter(Boolean).sort();
+  agents.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a;
+    opt.textContent = a;
+    agentFilter.appendChild(opt);
+  });
+}
+
+function getStatusBadgeClass(status) {
+  if (status.includes('Open') && !status.includes('with')) return 'badge-open';
+  if (status.includes('Reopened')) return 'badge-reopened';
+  if (status.includes('Pending')) return 'badge-pending';
+  if (status.includes('Customer')) return 'badge-customer';
+  if (status.includes('UAT')) return 'badge-uat';
+  if (status.includes('Progress')) return 'badge-inprogress';
+  return 'badge-open';
+}
+
+function getPriorityBadgeClass(priority) {
+  if (priority.includes('P0')) return 'badge-p0';
+  if (priority.includes('P1')) return 'badge-p1';
+  if (priority.includes('P2')) return 'badge-p2';
+  return 'badge-p3';
+}
+
+async function editStatus(ticketId, currentStatus) {
+  const newStatus = prompt('Enter new status:', currentStatus);
+  if (!newStatus || newStatus === currentStatus) return;
+  
+  try {
+    // Get current file
+    let sha = null;
+    try {
+      const res = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
+        headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+      });
+      const file = await res.json();
+      statusOverrides = JSON.parse(atob(file.content));
+      sha = file.sha;
+    } catch (e) {
+      statusOverrides = {};
+    }
+    
+    // Update
+    statusOverrides[ticketId] = newStatus;
+    
+    // Save to GitHub
+    await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `token ${GITHUB_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: `Update status for ${ticketId} to ${newStatus}`,
+        content: btoa(JSON.stringify(statusOverrides, null, 2)),
+        sha: sha
+      })
+    });
+    
+    alert('✅ Status updated successfully!');
+    refreshData();
+  } catch (error) {
+    alert('❌ Error saving status: ' + error.message);
+  }
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
+  
+  event.target.classList.add('active');
+  document.getElementById(tab + '-section').classList.add('active');
+}
+
+function exportCSV() {
+  const filtered = filterTickets();
+  const rows = filtered.map(ticket => {
+    const [id, subject, agent, status, priority, category, created, updated] = ticket;
+    const effectiveStatus = statusOverrides[id] || status;
+    return [id, subject, agent, effectiveStatus, priority, category, created, updated]
+      .map(v => `"${v.replace(/"/g, '""')}"`)
+      .join(',');
+  });
+  
+  const csv = ['Ticket ID,Subject,Agent,Status,Priority,Category,Created,Updated', ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tickets-export-${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+}
+
+function refreshData() {
+  document.getElementById('loading').style.display = 'flex';
+  document.getElementById('dashboard').style.display = 'none';
+  loadData();
+}
+
+// Attach filter handlers
+document.getElementById('search').addEventListener('input', renderTickets);
+document.getElementById('status-filter').addEventListener('change', renderTickets);
+document.getElementById('priority-filter').addEventListener('change', renderTickets);
+document.getElementById('agent-filter').addEventListener('change', renderTickets);
+</script>
+</body>
+</html>
