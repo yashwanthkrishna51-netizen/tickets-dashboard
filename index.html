@@ -70,15 +70,18 @@ button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(59, 130,
 .search-input { flex: 1; min-width: 250px; }
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th { text-align: left; padding: 16px; border-bottom: 2px solid #e5e7eb; font-weight: 600; background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%); }
+th { text-align: left; padding: 16px; border-bottom: 2px solid #e5e7eb; font-weight: 600; background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%); cursor: pointer; user-select: none; }
+th:hover { background: #e5e7eb; }
 td { padding: 16px; border-bottom: 1px solid #e5e7eb; }
+td.editable { cursor: pointer; transition: background 0.2s; }
+td.editable:hover { background: #f0f9ff; outline: 2px solid #3b82f6; outline-offset: -2px; }
 tr:hover { background: #f9fafb; }
 
 .ticket-link { color: #3b82f6; text-decoration: none; font-weight: 600; font-family: 'Courier New', monospace; }
 .ticket-link:hover { text-decoration: underline; }
 
 .badge { display: inline-block; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-.badge:hover { opacity: 0.8; transform: scale(1.05); }
+.badge:hover { opacity: 0.8; transform: scale(1.05); box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3); }
 .badge-open { background: #dbeafe; color: #1e40af; }
 .badge-reopened { background: #fef3c7; color: #92400e; }
 .badge-pending { background: #fed7aa; color: #92400e; }
@@ -210,14 +213,14 @@ tr:hover { background: #f9fafb; }
 <table id="tickets-table">
 <thead>
 <tr>
-<th>Ticket ID</th>
-<th>Subject</th>
-<th>Agent</th>
-<th>Status</th>
-<th>Priority</th>
-<th>Category</th>
-<th>Created</th>
-<th>Updated</th>
+<th onclick="sortTable(0)">Ticket ID ↕</th>
+<th onclick="sortTable(1)">Subject ↕</th>
+<th onclick="sortTable(2)">Agent ↕</th>
+<th onclick="sortTable(3)">Status ↕</th>
+<th onclick="sortTable(4)">Priority ↕</th>
+<th onclick="sortTable(5)">Category ↕</th>
+<th onclick="sortTable(6)">Created ↕</th>
+<th onclick="sortTable(7)">Updated ↕</th>
 </tr>
 </thead>
 <tbody id="tickets-tbody"></tbody>
@@ -232,8 +235,10 @@ tr:hover { background: #f9fafb; }
 const CONFIG_KEY = 'github_config';
 let GITHUB_OWNER, GITHUB_REPO, GITHUB_TOKEN;
 let tickets = [];
-let statusOverrides = {};
+let ticketOverrides = {}; // Changed from statusOverrides to store all column edits
 let analytics = {};
+let sortColumn = -1;
+let sortAscending = true;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -299,10 +304,29 @@ async function loadData() {
         headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
       });
       const statusFile = await statusRes.json();
-      statusOverrides = JSON.parse(atob(statusFile.content));
+      ticketOverrides = JSON.parse(atob(statusFile.content));
     } catch (e) {
-      statusOverrides = {};
+      ticketOverrides = {};
     }
+    
+    // Apply overrides to tickets
+    tickets = tickets.map(ticket => {
+      const ticketId = ticket[0];
+      if (ticketOverrides[ticketId]) {
+        const overrides = ticketOverrides[ticketId];
+        return [
+          ticket[0], // ID never changes
+          overrides.subject !== undefined ? overrides.subject : ticket[1],
+          overrides.agent !== undefined ? overrides.agent : ticket[2],
+          overrides.status !== undefined ? overrides.status : ticket[3],
+          overrides.priority !== undefined ? overrides.priority : ticket[4],
+          overrides.category !== undefined ? overrides.category : ticket[5],
+          overrides.created !== undefined ? overrides.created : ticket[6],
+          overrides.updated !== undefined ? overrides.updated : ticket[7]
+        ];
+      }
+      return ticket;
+    });
     
     // Calculate analytics
     analyzeData();
@@ -333,9 +357,8 @@ function analyzeData() {
   
   tickets.forEach(ticket => {
     const [id, subject, agent, status, priority, category, created, updated] = ticket;
-    const effectiveStatus = statusOverrides[id] || status;
     
-    analytics.byStatus[effectiveStatus] = (analytics.byStatus[effectiveStatus] || 0) + 1;
+    analytics.byStatus[status] = (analytics.byStatus[status] || 0) + 1;
     analytics.byPriority[priority] = (analytics.byPriority[priority] || 0) + 1;
     analytics.byCategory[category] = (analytics.byCategory[category] || 0) + 1;
     
@@ -453,27 +476,63 @@ function renderTickets() {
   const tbody = document.getElementById('tickets-tbody');
   tbody.innerHTML = '';
   
-  const filtered = filterTickets();
+  let filtered = filterTickets();
+  
+  // Apply sorting
+  if (sortColumn >= 0) {
+    filtered.sort((a, b) => {
+      let aVal = a[sortColumn] || '';
+      let bVal = b[sortColumn] || '';
+      
+      // Try numeric sort for dates and numbers
+      const aNum = parseFloat(aVal);
+      const bNum = parseFloat(bVal);
+      if (!isNaN(aNum) && !isNaN(bNum)) {
+        return sortAscending ? aNum - bNum : bNum - aNum;
+      }
+      
+      // String sort
+      const comparison = aVal.toString().localeCompare(bVal.toString());
+      return sortAscending ? comparison : -comparison;
+    });
+  }
+  
+  const columnNames = ['id', 'subject', 'agent', 'status', 'priority', 'category', 'created', 'updated'];
   
   filtered.forEach(ticket => {
     const [id, subject, agent, status, priority, category, created, updated] = ticket;
-    const effectiveStatus = statusOverrides[id] || status;
     const strippedId = id.replace(/^#(INT|DBS)/, '');
     const ticketLink = `https://askdarwin.darwinbox.com/staff/ticket/${strippedId}`;
     
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><a href="${ticketLink}" target="_blank" class="ticket-link">${id}</a></td>
-      <td>${subject}</td>
-      <td>${agent}</td>
-      <td><span class="badge ${getStatusBadgeClass(effectiveStatus)}" onclick="editStatus('${id}', '${effectiveStatus}')">${effectiveStatus}</span></td>
-      <td><span class="badge ${getPriorityBadgeClass(priority)}">${priority}</span></td>
-      <td>${category}</td>
-      <td>${created}</td>
-      <td>${updated}</td>
+      <td class="editable" onclick="editCell('${id}', 'subject', '${escapeHtml(subject)}')">${subject}</td>
+      <td class="editable" onclick="editCell('${id}', 'agent', '${escapeHtml(agent)}')">${agent}</td>
+      <td><span class="badge ${getStatusBadgeClass(status)}" onclick="editCell('${id}', 'status', '${escapeHtml(status)}')">${status}</span></td>
+      <td class="editable" onclick="editCell('${id}', 'priority', '${escapeHtml(priority)}')">${priority}</td>
+      <td class="editable" onclick="editCell('${id}', 'category', '${escapeHtml(category)}')">${category}</td>
+      <td class="editable" onclick="editCell('${id}', 'created', '${escapeHtml(created)}')">${created}</td>
+      <td class="editable" onclick="editCell('${id}', 'updated', '${escapeHtml(updated)}')">${updated}</td>
     `;
     tbody.appendChild(tr);
   });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML.replace(/'/g, '&apos;').replace(/"/g, '&quot;');
+}
+
+function sortTable(columnIndex) {
+  if (sortColumn === columnIndex) {
+    sortAscending = !sortAscending;
+  } else {
+    sortColumn = columnIndex;
+    sortAscending = true;
+  }
+  renderTickets();
 }
 
 function filterTickets() {
@@ -484,10 +543,9 @@ function filterTickets() {
   
   return tickets.filter(ticket => {
     const [id, subject, ag, st, pr] = ticket;
-    const effectiveStatus = statusOverrides[id] || st;
     
     const matchSearch = id.toLowerCase().includes(search) || subject.toLowerCase().includes(search) || ag.toLowerCase().includes(search);
-    const matchStatus = !status || effectiveStatus.includes(status);
+    const matchStatus = !status || st.includes(status);
     const matchPriority = !priority || pr.includes(priority);
     const matchAgent = !agent || ag === agent;
     
@@ -499,7 +557,11 @@ function populateFilters() {
   const statusFilter = document.getElementById('status-filter');
   const agentFilter = document.getElementById('agent-filter');
   
-  const statuses = [...new Set(tickets.map(t => statusOverrides[t[0]] || t[3]))].filter(Boolean).sort();
+  // Clear existing options except first
+  statusFilter.innerHTML = '<option value="">All Status</option>';
+  agentFilter.innerHTML = '<option value="">All Agents</option>';
+  
+  const statuses = [...new Set(tickets.map(t => t[3]))].filter(Boolean).sort();
   statuses.forEach(s => {
     const opt = document.createElement('option');
     opt.value = s;
@@ -533,9 +595,14 @@ function getPriorityBadgeClass(priority) {
   return 'badge-p3';
 }
 
-async function editStatus(ticketId, currentStatus) {
-  const newStatus = prompt('Enter new status:', currentStatus);
-  if (!newStatus || newStatus === currentStatus) return;
+async function editCell(ticketId, columnName, currentValue) {
+  // Unescape HTML entities
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = currentValue;
+  const unescapedValue = textarea.value;
+  
+  const newValue = prompt(`Edit ${columnName}:`, unescapedValue);
+  if (newValue === null || newValue === unescapedValue) return;
   
   try {
     // Get current file
@@ -545,14 +612,17 @@ async function editStatus(ticketId, currentStatus) {
         headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
       });
       const file = await res.json();
-      statusOverrides = JSON.parse(atob(file.content));
+      ticketOverrides = JSON.parse(atob(file.content));
       sha = file.sha;
     } catch (e) {
-      statusOverrides = {};
+      ticketOverrides = {};
     }
     
     // Update
-    statusOverrides[ticketId] = newStatus;
+    if (!ticketOverrides[ticketId]) {
+      ticketOverrides[ticketId] = {};
+    }
+    ticketOverrides[ticketId][columnName] = newValue;
     
     // Save to GitHub
     await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json`, {
@@ -562,16 +632,36 @@ async function editStatus(ticketId, currentStatus) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        message: `Update status for ${ticketId} to ${newStatus}`,
-        content: btoa(JSON.stringify(statusOverrides, null, 2)),
+        message: `Update ${columnName} for ${ticketId}`,
+        content: btoa(JSON.stringify(ticketOverrides, null, 2)),
         sha: sha
       })
     });
     
-    alert('✅ Status updated successfully!');
-    refreshData();
+    alert(`✅ ${columnName} updated successfully!`);
+    
+    // Update local ticket data immediately
+    const ticketIndex = tickets.findIndex(t => t[0] === ticketId);
+    if (ticketIndex >= 0) {
+      const columnMap = {
+        'subject': 1,
+        'agent': 2,
+        'status': 3,
+        'priority': 4,
+        'category': 5,
+        'created': 6,
+        'updated': 7
+      };
+      tickets[ticketIndex][columnMap[columnName]] = newValue;
+    }
+    
+    // Re-analyze and re-render
+    analyzeData();
+    renderAnalysis();
+    renderTickets();
+    populateFilters();
   } catch (error) {
-    alert('❌ Error saving status: ' + error.message);
+    alert('❌ Error saving: ' + error.message);
   }
 }
 
@@ -586,11 +676,7 @@ function switchTab(tab) {
 function exportCSV() {
   const filtered = filterTickets();
   const rows = filtered.map(ticket => {
-    const [id, subject, agent, status, priority, category, created, updated] = ticket;
-    const effectiveStatus = statusOverrides[id] || status;
-    return [id, subject, agent, effectiveStatus, priority, category, created, updated]
-      .map(v => `"${v.replace(/"/g, '""')}"`)
-      .join(',');
+    return ticket.map(v => `"${v.replace(/"/g, '""')}"`).join(',');
   });
   
   const csv = ['Ticket ID,Subject,Agent,Status,Priority,Category,Created,Updated', ...rows].join('\n');
