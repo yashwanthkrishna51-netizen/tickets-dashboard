@@ -209,6 +209,14 @@ tr:hover { background: #f9fafb; }
 <button onclick="exportCSV()">📥 Export CSV</button>
 <button onclick="openAllTickets()" style="background: linear-gradient(135deg, #059669 0%, #047857 100%);">🔗 Open All Tickets</button>
 <button onclick="refreshData()" style="background: white; color: #3b82f6; border: 2px solid #3b82f6;">🔄 Refresh</button>
+<button onclick="toggleDebug()" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);">🐛 Debug Info</button>
+</div>
+<div id="debug-panel" style="display: none; background: #1f2937; color: #f3f4f6; padding: 1.5rem; border-radius: 12px; margin-top: 1rem; font-family: 'Courier New', monospace; font-size: 12px; max-height: 400px; overflow-y: auto;">
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+<strong style="font-size: 14px;">🐛 Debug Information</strong>
+<button onclick="toggleDebug()" style="background: #374151; color: white; border: none; padding: 4px 12px; border-radius: 6px; cursor: pointer;">Close</button>
+</div>
+<div id="debug-content"></div>
 </div>
 <div style="overflow-x: auto;">
 <table id="tickets-table">
@@ -382,6 +390,11 @@ async function loadData() {
     renderAnalysis();
     renderTickets();
     populateFilters();
+    
+    // Update debug panel if visible
+    if (document.getElementById('debug-panel').style.display === 'block') {
+      updateDebugPanel();
+    }
   } catch (error) {
     document.getElementById('loading').innerHTML = `<div style="color: #dc2626;">❌ Error loading data: ${error.message}<br><br><button onclick="location.reload()">Retry</button><br><button onclick="localStorage.removeItem('${CONFIG_KEY}'); location.reload()" style="margin-top: 1rem; background: #6b7280;">Reconfigure</button></div>`;
   }
@@ -735,6 +748,11 @@ async function editCell(ticketId, columnName, currentValue) {
     
     renderTickets();
     populateFilters();
+    
+    // Update debug panel if visible
+    if (document.getElementById('debug-panel').style.display === 'block') {
+      updateDebugPanel();
+    }
   } catch (error) {
     console.error('❌ Error saving:', error);
     alert('❌ Error saving: ' + error.message);
@@ -796,6 +814,80 @@ function refreshData() {
   document.getElementById('loading').style.display = 'flex';
   document.getElementById('dashboard').style.display = 'none';
   loadData();
+}
+
+function toggleDebug() {
+  const panel = document.getElementById('debug-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  if (panel.style.display === 'block') {
+    updateDebugPanel();
+  }
+}
+
+function updateDebugPanel() {
+  const content = document.getElementById('debug-content');
+  const overrideTickets = Object.keys(ticketOverrides);
+  
+  let html = `
+<div style="margin-bottom: 1rem;">
+  <div style="color: #60a5fa; margin-bottom: 0.5rem;">📊 DATA LOADED:</div>
+  <div>Total tickets in CSV: <strong>${tickets.length}</strong></div>
+  <div>Overrides in JSON: <strong>${overrideTickets.length}</strong></div>
+  <div>Tickets with applied overrides: <strong>${tickets.filter(t => ticketOverrides[t[0]]).length}</strong></div>
+</div>
+`;
+
+  if (overrideTickets.length > 0) {
+    html += `
+<div style="margin-bottom: 1rem;">
+  <div style="color: #60a5fa; margin-bottom: 0.5rem;">📝 OVERRIDE DETAILS:</div>
+`;
+    overrideTickets.slice(0, 5).forEach(ticketId => {
+      const override = ticketOverrides[ticketId];
+      const ticket = tickets.find(t => t[0] === ticketId);
+      html += `
+  <div style="background: #374151; padding: 0.75rem; border-radius: 6px; margin-bottom: 0.5rem;">
+    <div style="color: #fbbf24; font-weight: bold;">${ticketId}</div>
+    <div style="margin-top: 0.5rem;">
+      ${Object.entries(override).map(([key, value]) => `
+        <div><span style="color: #9ca3af;">${key}:</span> ${value}</div>
+      `).join('')}
+    </div>
+    ${ticket ? `<div style="margin-top: 0.5rem; color: #34d399;">✓ Applied to ticket</div>` : `<div style="margin-top: 0.5rem; color: #f87171;">✗ Ticket not found in CSV</div>`}
+  </div>
+`;
+    });
+    if (overrideTickets.length > 5) {
+      html += `<div style="color: #9ca3af;">... and ${overrideTickets.length - 5} more</div>`;
+    }
+    html += `</div>`;
+  } else {
+    html += `
+<div style="background: #374151; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
+  <div style="color: #fbbf24;">ℹ️ No overrides found</div>
+  <div style="margin-top: 0.5rem; color: #9ca3af;">The ticket_status.json file is empty or doesn't exist.</div>
+</div>
+`;
+  }
+
+  html += `
+<div>
+  <div style="color: #60a5fa; margin-bottom: 0.5rem;">🔗 DATA SOURCES:</div>
+  <div style="background: #374151; padding: 0.75rem; border-radius: 6px; word-break: break-all; font-size: 10px;">
+    <div style="margin-bottom: 0.5rem;">CSV: https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/open_with_us_tickets.csv</div>
+    <div>JSON: https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/ticket_status.json</div>
+  </div>
+</div>
+
+<div style="margin-top: 1rem;">
+  <div style="color: #60a5fa; margin-bottom: 0.5rem;">💾 RAW JSON CONTENT:</div>
+  <div style="background: #374151; padding: 0.75rem; border-radius: 6px; max-height: 200px; overflow-y: auto;">
+    <pre style="margin: 0; white-space: pre-wrap; word-break: break-all;">${JSON.stringify(ticketOverrides, null, 2)}</pre>
+  </div>
+</div>
+`;
+
+  content.innerHTML = html;
 }
 
 // Attach filter handlers
